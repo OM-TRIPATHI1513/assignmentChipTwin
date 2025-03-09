@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Update package list and install dependencies
+echo "[+] Installing dependencies..."
+sudo apt update && sudo apt install -y \
+    qemu-system-riscv \
+    gcc-riscv64-unknown-elf \
+    gdb-multiarch \
+    make
+
+# Create a working directory
+WORKDIR="$HOME/qemu_riscv"
+mkdir -p $WORKDIR
+cd $WORKDIR
+
+# Create firmware source file
+echo "[+] Creating firmware.c..."
+cat <<EOF > firmware.c
+#include <stdint.h>
+#define UART0 ((volatile uint32_t*)0x10000000)
+
+void uart_putc(char c) { *UART0 = c; }
+void uart_puts(const char* str) { while (*str) uart_putc(*str++); }
+
+int main() {
+    uart_puts("Hello from QEMU!\n");
+    while (1);
+    return 0;
+}
+EOF
+
+# Compile the firmware
+echo "[+] Compiling firmware..."
+riscv64-unknown-elf-gcc -nostartfiles -o firmware.elf firmware.c
+
+# Create a script to run QEMU
+echo "[+] Creating run_qemu.sh..."
+cat <<EOF > run_qemu.sh
+#!/bin/bash
+qemu-system-riscv32 -M virt -kernel firmware.elf -serial mon:stdio -s -S
+EOF
+chmod +x run_qemu.sh
+
+# Create a GDB script
+echo "[+] Creating gdb_script.gdb..."
+cat <<EOF > gdb_script.gdb
+target remote :1234
+b main
+c
+EOF
+
+# Run QEMU in the background
+echo "[+] Starting QEMU..."
+./run_qemu.sh &
+
+# Wait for QEMU to start
+sleep 2
+
+# Start GDB debugging
+echo "[+] Launching GDB..."
+riscv64-unknown-elf-gdb firmware.elf -x gdb_script.gdb
